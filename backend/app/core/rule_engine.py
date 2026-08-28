@@ -78,17 +78,17 @@ def run_deterministic_reconciliation(
         )
 
     # 2. Check Bank Statement for Unmatched Phantom Credits
-    matched_pg_ids = erp_pg_merge["pg_txn_id"].dropna().tolist()
+    matched_pg_set = set(erp_pg_merge["pg_txn_id"].dropna())
+    
     for _, bank_row in bank_df.iterrows():
-        is_matched = any(
-            str(pg_id) in str(bank_row["narration"])
-            for pg_id in matched_pg_ids[-500:]
-        )
-        if (
-            not is_matched
-            and "BATCH" not in bank_row["narration"]
-            and bank_row["type"] == "CREDIT"
-        ):
+        # Skip batch settlements or debits
+        if "BATCH" in str(bank_row["narration"]) or bank_row["type"] != "CREDIT":
+            continue
+            
+        # Extract PG txn ID from narration (e.g., CMS/RAZORPAY/pay_xyz/...)
+        extracted_pg_id = next((part for part in str(bank_row["narration"]).split('/') if part.startswith('pay_')), None)
+        
+        if extracted_pg_id not in matched_pg_set:
             flagged_for_agent.append(
                 {
                     "order_id": "N/A",
@@ -103,11 +103,7 @@ def run_deterministic_reconciliation(
         "total_records": len(erp_df),
         "reconciled_count": len(reconciled),
         "exception_count": len(flagged_for_agent),
-        "match_rate": round(
-            (len(reconciled) / (len(reconciled) + len(flagged_for_agent)))
-            * 100,
-            2,
-        ),
+        "match_rate": round((len(reconciled) / len(erp_df)) * 100, 2), # Fixed match rate math
         "reconciled_sample": reconciled[:10],
         "exceptions": flagged_for_agent,
     }
